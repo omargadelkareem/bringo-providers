@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./context";
 import "./style.css";
+import "./productImageUpload";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
