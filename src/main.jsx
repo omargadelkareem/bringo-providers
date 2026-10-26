@@ -3,12 +3,17 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { AuthProvider } from "./context";
+import ProductExcelImport from "./ProductExcelImport";
 import "./style.css";
+import "./productImageUpload";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <BrowserRouter>
-      <AuthProvider><App /></AuthProvider>
+      <AuthProvider>
+        <App />
+        <ProductExcelImport />
+      </AuthProvider>
     </BrowserRouter>
   </React.StrictMode>
 );
