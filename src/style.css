@@ -9,3 +9,6 @@
 @media(max-width:1150px){.compact-orders{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:950px){.overview-stats{grid-template-columns:repeat(2,1fr)}.compact-orders{grid-template-columns:1fr}}
 @media(max-width:520px){.overview-stats{grid-template-columns:repeat(2,1fr)}}
+
+/* Product image upload */
+.product-image-picker{width:100%;padding:10px!important;border:1px dashed var(--teal)!important;background:var(--mint)!important;cursor:pointer}.product-image-hint{font-size:10px;color:var(--muted);font-weight:600}.product-image-preview{display:none;width:100%;max-height:180px;object-fit:cover;border-radius:14px;border:1px solid var(--border);margin-top:4px}
