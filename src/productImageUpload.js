@@ -12,10 +12,40 @@ function setReactInputValue(input, value) {
   input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
-async function uploadToCloudinary(file) {
-  if (!CLOUD_NAME || !UPLOAD_PRESET) {
-    throw new Error("CLOUDINARY_NOT_CONFIGURED");
+function getImageSource(value) {
+  const image = String(value || "").trim();
+  if (!image) return { label: "لا توجد صورة", type: "empty" };
+  if (image.startsWith("https://res.cloudinary.com/") || image.startsWith("http://res.cloudinary.com/")) {
+    return { label: "☁️ Cloudinary", type: "cloudinary" };
   }
+  if (image.startsWith("data:image") || (!image.startsWith("http") && image.length > 500)) {
+    return { label: "💾 Firebase / Base64", type: "base64" };
+  }
+  if (image.startsWith("http")) return { label: "🔗 رابط خارجي", type: "external" };
+  return { label: "💾 صورة مخزنة", type: "stored" };
+}
+
+async function copyText(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand("copy");
+    textarea.remove();
+    return copied;
+  }
+}
+
+async function uploadToCloudinary(file) {
+  if (!CLOUD_NAME || !UPLOAD_PRESET) throw new Error("CLOUDINARY_NOT_CONFIGURED");
 
   const formData = new FormData();
   formData.append("file", file);
@@ -31,7 +61,6 @@ async function uploadToCloudinary(file) {
   if (!response.ok || !data.secure_url) {
     throw new Error(data?.error?.message || "UPLOAD_FAILED");
   }
-
   return data.secure_url;
 }
 
@@ -62,11 +91,53 @@ function enhanceProductImageField() {
     hint.className = "product-image-hint";
     hint.textContent = CLOUD_NAME && UPLOAD_PRESET
       ? "اختر صورة المنتج وسيتم رفعها تلقائيًا (JPG / PNG / WEBP - بحد أقصى 1.5MB)"
-      : "أضف VITE_CLOUDINARY_CLOUD_NAME و VITE_CLOUDINARY_UPLOAD_PRESET في Vercel لتفعيل رفع الصور";
+      : "أضف إعدادات Cloudinary في Vercel لتفعيل رفع الصور";
 
     const status = document.createElement("small");
     status.className = "product-image-hint";
     status.style.display = "none";
+
+    const sourceRow = document.createElement("div");
+    sourceRow.style.display = "flex";
+    sourceRow.style.alignItems = "center";
+    sourceRow.style.gap = "8px";
+    sourceRow.style.flexWrap = "wrap";
+    sourceRow.style.marginTop = "8px";
+
+    const sourceBadge = document.createElement("span");
+    sourceBadge.style.fontSize = "12px";
+    sourceBadge.style.fontWeight = "700";
+    sourceBadge.style.padding = "5px 9px";
+    sourceBadge.style.borderRadius = "999px";
+    sourceBadge.style.background = "#f3f4f6";
+
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.textContent = "نسخ رابط الصورة";
+    copyButton.style.border = "1px solid #ddd";
+    copyButton.style.background = "white";
+    copyButton.style.borderRadius = "8px";
+    copyButton.style.padding = "5px 9px";
+    copyButton.style.cursor = "pointer";
+    copyButton.style.fontSize = "12px";
+
+    const updateSourceUi = () => {
+      const source = getImageSource(textInput.value);
+      sourceBadge.textContent = `مصدر الصورة: ${source.label}`;
+      copyButton.style.display = textInput.value?.trim() ? "inline-block" : "none";
+      copyButton.disabled = source.type === "base64" || source.type === "stored";
+      copyButton.title = copyButton.disabled ? "الصورة ليست رابط URL" : "نسخ رابط الصورة";
+    };
+
+    copyButton.addEventListener("click", async () => {
+      const copied = await copyText(textInput.value);
+      const oldText = copyButton.textContent;
+      copyButton.textContent = copied ? "تم النسخ ✓" : "تعذر النسخ";
+      setTimeout(() => { copyButton.textContent = oldText; }, 1500);
+    });
+
+    sourceRow.appendChild(sourceBadge);
+    sourceRow.appendChild(copyButton);
 
     const preview = document.createElement("img");
     preview.className = "product-image-preview";
@@ -75,6 +146,7 @@ function enhanceProductImageField() {
       preview.src = textInput.value;
       preview.style.display = "block";
     }
+    updateSourceUi();
 
     picker.addEventListener("change", async () => {
       const file = picker.files?.[0];
@@ -92,19 +164,20 @@ function enhanceProductImageField() {
 
       picker.disabled = true;
       status.style.display = "block";
-      status.textContent = "جاري رفع الصورة...";
+      status.textContent = "جاري رفع الصورة إلى Cloudinary...";
 
       try {
         const imageUrl = await uploadToCloudinary(file);
         setReactInputValue(textInput, imageUrl);
         preview.src = imageUrl;
         preview.style.display = "block";
-        status.textContent = "تم رفع الصورة ✓ احفظ المنتج لتظهر في التطبيق";
+        updateSourceUi();
+        status.textContent = "تم الرفع إلى Cloudinary ✓ احفظ المنتج لتظهر الصورة في التطبيق";
       } catch (error) {
         console.error("Product image upload failed", error);
         status.textContent = "تعذر رفع الصورة";
         if (error?.message === "CLOUDINARY_NOT_CONFIGURED") {
-          window.alert("Cloudinary غير مُعد بعد. أضف Cloud Name و Upload Preset في Environment Variables على Vercel.");
+          window.alert("Cloudinary غير مُعد بعد. راجع Environment Variables على Vercel.");
         } else {
           window.alert(`تعذر رفع الصورة: ${error?.message || "حاول مرة أخرى"}`);
         }
@@ -117,6 +190,7 @@ function enhanceProductImageField() {
     label.appendChild(picker);
     label.appendChild(hint);
     label.appendChild(status);
+    label.appendChild(sourceRow);
     label.appendChild(preview);
   });
 }
