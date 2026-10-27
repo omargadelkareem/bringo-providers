@@ -1,4 +1,6 @@
 const MAX_IMAGE_SIZE = 1.5 * 1024 * 1024;
+const CLOUD_NAME = import.meta.env.VITE_CLOUDINARY_CLOUD_NAME?.trim();
+const UPLOAD_PRESET = import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET?.trim();
 
 function setReactInputValue(input, value) {
   const setter = Object.getOwnPropertyDescriptor(
@@ -8,6 +10,29 @@ function setReactInputValue(input, value) {
   setter?.call(input, value);
   input.dispatchEvent(new Event("input", { bubbles: true }));
   input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+async function uploadToCloudinary(file) {
+  if (!CLOUD_NAME || !UPLOAD_PRESET) {
+    throw new Error("CLOUDINARY_NOT_CONFIGURED");
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", UPLOAD_PRESET);
+  formData.append("folder", "bringo/products");
+
+  const response = await fetch(
+    `https://api.cloudinary.com/v1_1/${encodeURIComponent(CLOUD_NAME)}/image/upload`,
+    { method: "POST", body: formData }
+  );
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.secure_url) {
+    throw new Error(data?.error?.message || "UPLOAD_FAILED");
+  }
+
+  return data.secure_url;
 }
 
 function enhanceProductImageField() {
@@ -35,7 +60,13 @@ function enhanceProductImageField() {
 
     const hint = document.createElement("small");
     hint.className = "product-image-hint";
-    hint.textContent = "اختر صورة من الجهاز (JPG / PNG / WEBP - بحد أقصى 1.5MB)";
+    hint.textContent = CLOUD_NAME && UPLOAD_PRESET
+      ? "اختر صورة المنتج وسيتم رفعها تلقائيًا (JPG / PNG / WEBP - بحد أقصى 1.5MB)"
+      : "أضف VITE_CLOUDINARY_CLOUD_NAME و VITE_CLOUDINARY_UPLOAD_PRESET في Vercel لتفعيل رفع الصور";
+
+    const status = document.createElement("small");
+    status.className = "product-image-hint";
+    status.style.display = "none";
 
     const preview = document.createElement("img");
     preview.className = "product-image-preview";
@@ -45,7 +76,7 @@ function enhanceProductImageField() {
       preview.style.display = "block";
     }
 
-    picker.addEventListener("change", () => {
+    picker.addEventListener("change", async () => {
       const file = picker.files?.[0];
       if (!file) return;
       if (!file.type.startsWith("image/")) {
@@ -59,19 +90,33 @@ function enhanceProductImageField() {
         return;
       }
 
-      const reader = new FileReader();
-      reader.onload = () => {
-        const value = String(reader.result || "");
-        setReactInputValue(textInput, value);
-        preview.src = value;
+      picker.disabled = true;
+      status.style.display = "block";
+      status.textContent = "جاري رفع الصورة...";
+
+      try {
+        const imageUrl = await uploadToCloudinary(file);
+        setReactInputValue(textInput, imageUrl);
+        preview.src = imageUrl;
         preview.style.display = "block";
-      };
-      reader.onerror = () => window.alert("تعذر قراءة الصورة");
-      reader.readAsDataURL(file);
+        status.textContent = "تم رفع الصورة ✓ احفظ المنتج لتظهر في التطبيق";
+      } catch (error) {
+        console.error("Product image upload failed", error);
+        status.textContent = "تعذر رفع الصورة";
+        if (error?.message === "CLOUDINARY_NOT_CONFIGURED") {
+          window.alert("Cloudinary غير مُعد بعد. أضف Cloud Name و Upload Preset في Environment Variables على Vercel.");
+        } else {
+          window.alert(`تعذر رفع الصورة: ${error?.message || "حاول مرة أخرى"}`);
+        }
+        picker.value = "";
+      } finally {
+        picker.disabled = false;
+      }
     });
 
     label.appendChild(picker);
     label.appendChild(hint);
+    label.appendChild(status);
     label.appendChild(preview);
   });
 }
