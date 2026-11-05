@@ -11,6 +11,7 @@ import { onValue, push, ref, remove, set, update } from "firebase/database";
 import { db } from "./firebase";
 import { useAuth } from "./context";
 import { S, labels, money, date, normalizeStatus, isAccounting } from "./orders";
+import ProductImageLibrary from "./ProductImageLibrary";
 
 const now = () => Date.now();
 
@@ -375,11 +376,12 @@ function Orders(){
 function Products(){
   const{store}=useAuth();
   const[products,setProducts]=useState([]);
-  const[f,setF]=useState({name:"",price:"",stock:"",unit:"قطعة",menuCategoryName:"",image:"",isAvailable:true});
+  const[f,setF]=useState({name:"",price:"",stock:"",unit:"قطعة",menuCategoryName:"",image:"",catalogProductId:"",isAvailable:true});
   const[edit,setEdit]=useState(null);
+  const[showImageLibrary,setShowImageLibrary]=useState(false);
   useEffect(()=>onValue(ref(db,"products"),s=>{const d=s.val()||{};setProducts(Object.entries(d).map(([id,v])=>({id,...v})).filter(x=>String(x.storeId)===String(store.id))) }),[store.id]);
   async function save(e){e.preventDefault();if(!f.name||+f.price<=0)return alert("اكتب الاسم والسعر");const p={...f,price:+f.price,stock:+(f.stock||0),storeId:store.id,storeName:store.name,storeType:store.type,updatedAt:now()};if(edit)await update(ref(db,`products/${edit}`),p);else{const q=push(ref(db,"products"));await set(q,{id:q.key,...p,createdAt:now()})}setF({name:"",price:"",stock:"",unit:"قطعة",menuCategoryName:"",image:"",isAvailable:true});setEdit(null)}
-  return <><Title title="المنتجات" sub="إدارة قائمة منتجات متجرك"/><div className="products"><form className="panel form" onSubmit={save}><h2>{edit?"تعديل المنتج":"إضافة منتج"}</h2>{["name","price","stock","unit","menuCategoryName","image"].map(k=><label key={k}>{({name:"الاسم",price:"السعر",stock:"المخزون",unit:"الوحدة",menuCategoryName:"القسم",image:"رابط الصورة"})[k]}<input type={["price","stock"].includes(k)?"number":"text"} value={f[k]} onChange={e=>setF({...f,[k]:e.target.value})}/></label>)}<label className="check"><input type="checkbox" checked={f.isAvailable} onChange={e=>setF({...f,isAvailable:e.target.checked})}/>متاح للبيع</label><button>{edit?"حفظ التعديلات":"إضافة المنتج"}</button></form><div className="panel table"><h2>المنتجات ({products.length})</h2><table><thead><tr><th>المنتج</th><th>القسم</th><th>السعر</th><th>الحالة</th><th/></tr></thead><tbody>{products.map(p=><tr key={p.id}><td>{p.name}</td><td>{p.menuCategoryName||"-"}</td><td>{money(p.price)}</td><td>{p.isAvailable===false?"غير متاح":"متاح"}</td><td><button className="tiny" onClick={()=>{setEdit(p.id);setF({...f,...p})}}>تعديل</button><button className="tiny danger" onClick={()=>confirm("حذف المنتج؟")&&remove(ref(db,`products/${p.id}`))}>حذف</button></td></tr>)}</tbody></table></div></div></>;
+  return <><Title title="المنتجات" sub="إدارة قائمة منتجات متجرك"/><div className="products"><form className="panel form" onSubmit={save}><h2>{edit?"تعديل المنتج":"إضافة منتج"}</h2>{["name","price","stock","unit","menuCategoryName","image"].map(k=><label key={k}>{({name:"الاسم",price:"السعر",stock:"المخزون",unit:"الوحدة",menuCategoryName:"القسم",image:"رابط الصورة"})[k]}<input type={["price","stock"].includes(k)?"number":"text"} value={f[k]} onChange={e=>setF({...f,[k]:e.target.value})}/></label>)}<button type="button" className="bringo-library-trigger" onClick={()=>setShowImageLibrary(true)}>اختيار صورة من مكتبة برينجو</button><label className="check"><input type="checkbox" checked={f.isAvailable} onChange={e=>setF({...f,isAvailable:e.target.checked})}/>متاح للبيع</label><button>{edit?"حفظ التعديلات":"إضافة المنتج"}</button></form><div className="panel table"><h2>المنتجات ({products.length})</h2><table><thead><tr><th>المنتج</th><th>القسم</th><th>السعر</th><th>الحالة</th><th/></tr></thead><tbody>{products.map(p=><tr key={p.id}><td>{p.name}</td><td>{p.menuCategoryName||"-"}</td><td>{money(p.price)}</td><td>{p.isAvailable===false?"غير متاح":"متاح"}</td><td><button className="tiny" onClick={()=>{setEdit(p.id);setF({...f,...p})}}>تعديل</button><button className="tiny danger" onClick={()=>confirm("حذف المنتج؟")&&remove(ref(db,`products/${p.id}`))}>حذف</button></td></tr>)}</tbody></table></div></div>{showImageLibrary&&<ProductImageLibrary onClose={()=>setShowImageLibrary(false)} onSelect={({image,catalogProductId})=>setF(current=>({...current,image,catalogProductId}))}/>}</>;
 }
 
 function Settlements(){
