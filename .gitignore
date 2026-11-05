@@ -28,3 +28,5 @@ Thumbs.db
 # Archives
 *.zip
 *.rar
+# Catalog review artifacts / source data
+catalog-review/*.json
