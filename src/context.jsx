@@ -1,6 +1,6 @@
 // src/context.jsx
 import { createContext, useContext, useEffect, useState } from "react";
-import { get, ref } from "firebase/database";
+import { get, onValue, ref } from "firebase/database";
 import { db } from "./firebase";
 
 const AuthContext = createContext(null);
@@ -14,6 +14,27 @@ export function AuthProvider({ children }) {
   const [error, setError] = useState("");
 
   useEffect(() => { restoreSession(); }, []);
+
+  // Keep the provider dashboard in sync with location/profile changes.
+  useEffect(() => {
+    const storeId = provider?.storeId;
+    if (!storeId) return undefined;
+    return onValue(ref(db, `stores/${storeId}`), snapshot => {
+      if (!snapshot.exists()) {
+        setError("المتجر المرتبط بالحساب غير موجود");
+        setStore(null);
+        return;
+      }
+      const data = snapshot.val();
+      if (data?.isActive === false) {
+        setError("تم إيقاف المتجر من الإدارة");
+        setStore(null);
+        return;
+      }
+      setStore({ ...data, id: storeId });
+      setError("");
+    }, () => setError("تعذر مزامنة بيانات المتجر"));
+  }, [provider?.storeId]);
 
   function clearAuthState() {
     localStorage.removeItem(SESSION_KEY);
