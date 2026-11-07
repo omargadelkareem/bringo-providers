@@ -24,3 +24,5 @@
 @media(max-width:600px){.provider-location{padding:13px}.provider-location-actions>*{width:100%}}
 
 .provider-interactive-map{height:310px;width:100%;z-index:0;direction:ltr}.provider-interactive-map .leaflet-container{font-family:inherit}.provider-interactive-map .leaflet-control-container{direction:ltr}
+
+.provider-location-warning{display:flex;flex-wrap:wrap;align-items:center;gap:11px;background:#fff7e9;border:1px solid #f1dfbb;color:#6e521b;padding:13px 16px;border-radius:13px;margin-bottom:18px;font-size:13px;font-weight:800}.provider-location-warning span{flex:1}.provider-location-warning a{background:#174746;color:white;text-decoration:none;border-radius:9px;padding:9px 14px;white-space:nowrap}
