@@ -1,3 +1,5 @@
+import {imageGroup,fetchGroupImage} from "./autoProductImages";
+import ProductImageLibrary from "./ProductImageLibrary";
 import {
   Navigate, NavLink, Outlet, Route, Routes, useParams
 } from "react-router-dom";
@@ -373,15 +375,123 @@ function Orders(){
 }
 
 function Products(){
-  const{store}=useAuth();
-  const[products,setProducts]=useState([]);
-  const[f,setF]=useState({name:"",price:"",stock:"",unit:"قطعة",menuCategoryName:"",image:"",isAvailable:true});
-  const[edit,setEdit]=useState(null);
-  useEffect(()=>onValue(ref(db,"products"),s=>{const d=s.val()||{};setProducts(Object.entries(d).map(([id,v])=>({id,...v})).filter(x=>String(x.storeId)===String(store.id))) }),[store.id]);
-  async function save(e){e.preventDefault();if(!f.name||+f.price<=0)return alert("اكتب الاسم والسعر");const p={...f,price:+f.price,stock:+(f.stock||0),storeId:store.id,storeName:store.name,storeType:store.type,updatedAt:now()};if(edit)await update(ref(db,`products/${edit}`),p);else{const q=push(ref(db,"products"));await set(q,{id:q.key,...p,createdAt:now()})}setF({name:"",price:"",stock:"",unit:"قطعة",menuCategoryName:"",image:"",isAvailable:true});setEdit(null)}
-  return <><Title title="المنتجات" sub="إدارة قائمة منتجات متجرك"/><div className="products"><form className="panel form" onSubmit={save}><h2>{edit?"تعديل المنتج":"إضافة منتج"}</h2>{["name","price","stock","unit","menuCategoryName","image"].map(k=><label key={k}>{({name:"الاسم",price:"السعر",stock:"المخزون",unit:"الوحدة",menuCategoryName:"القسم",image:"رابط الصورة"})[k]}<input type={["price","stock"].includes(k)?"number":"text"} value={f[k]} onChange={e=>setF({...f,[k]:e.target.value})}/></label>)}<label className="check"><input type="checkbox" checked={f.isAvailable} onChange={e=>setF({...f,isAvailable:e.target.checked})}/>متاح للبيع</label><button>{edit?"حفظ التعديلات":"إضافة المنتج"}</button></form><div className="panel table"><h2>المنتجات ({products.length})</h2><table><thead><tr><th>المنتج</th><th>القسم</th><th>السعر</th><th>الحالة</th><th/></tr></thead><tbody>{products.map(p=><tr key={p.id}><td>{p.name}</td><td>{p.menuCategoryName||"-"}</td><td>{money(p.price)}</td><td>{p.isAvailable===false?"غير متاح":"متاح"}</td><td><button className="tiny" onClick={()=>{setEdit(p.id);setF({...f,...p})}}>تعديل</button><button className="tiny danger" onClick={()=>confirm("حذف المنتج؟")&&remove(ref(db,`products/${p.id}`))}>حذف</button></td></tr>)}</tbody></table></div></div></>;
-}
+  const {store}=useAuth();
+  const [products,setProducts]=useState([]);
+  const [f,setF]=useState({name:"",price:"",stock:"",unit:"قطعة",menuCategoryName:"",image:"",isAvailable:true});
+  const [edit,setEdit]=useState(null);
+  const [uploading,setUploading]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [imageError,setImageError]=useState("");
+  const [libraryOpen,setLibraryOpen]=useState(false);
+  const [bulkOpen,setBulkOpen]=useState(false);
+  const [autoBusy,setAutoBusy]=useState(false);
+  const [autoStatus,setAutoStatus]=useState("");
+  async function autoAssignImages(){
+    if(autoBusy)return;
+    const missing=products.filter(p=>!p.image);
+    if(!missing.length){setAutoStatus("كل المنتجات لديها صور بالفعل");return;}
+    if(!confirm(`سيتم البحث عن صور توضيحية وإسنادها تلقائيًا للمنتجات المناسبة من أصل ${missing.length} منتج بدون صورة. المنتجات غير المعروفة والأدوية ستُترك بدون تغيير. متابعة؟`))return;
+    setAutoBusy(true);setAutoStatus("جاري البحث عن الصور وإسنادها...");
+    const cache=new Map();let saved=0,skipped=0,failed=0;
+    for(const product of missing){
+      const group=imageGroup(product);
+      if(!group){skipped++;continue;}
+      try{
+        let photo=cache.get(group.query);
+        if(photo===undefined){photo=await fetchGroupImage(group);cache.set(group.query,photo);}
+        if(!photo){skipped++;continue;}
+        await update(ref(db,`products/${product.id}`),{image:photo.image,imageCredit:photo.imageCredit,imageLicense:photo.imageLicense,imageSourceUrl:photo.imageSourceUrl,updatedAt:now()});saved++;
+        setAutoStatus(`جاري الإسناد: ${saved} صورة...`);
+      }catch(error){failed++;}
+    }
+    setAutoStatus(`اكتمل الإسناد: ${saved} صورة، ${skipped} منتج بدون تطابق، ${failed} فشل. راجع الصور التوضيحية قبل عرضها للعملاء.`);
+    setAutoBusy(false);
+  }
+  const [bulkLibraryOpen,setBulkLibraryOpen]=useState(false);
+  const [bulkTarget,setBulkTarget]=useState(null);
+  const [bulkImages,setBulkImages]=useState({});
+  const [bulkSelected,setBulkSelected]=useState({});
+  const [bulkSaving,setBulkSaving]=useState(false);
+  const [bulkResult,setBulkResult]=useState("");
+  const imageKey=v=>String(v||"").toLowerCase().replace(/[أإآ]/g,"ا").replace(/ى/g,"ي").replace(/ة/g,"ه").replace(/[^\\p{L}\\p{N}]+/gu," ").trim().replace(/\\s+/g," ");
+  const ignoreWords=new Set(["كبير","صغير","وسط","دبل","سنجل","وجبة","وجبات","طبق","سندوتش","ساندوتش","قطعة","قطع","حجم","عرض","سوبر","جامبو","عادي","اكسترا","مع","بدون"]);
+  const signature=v=>imageKey(v).split(" ").filter(x=>x.length>1&&!ignoreWords.has(x)).join(" ");
+  const unpictured=products.filter(p=>!p.image);
+  const suggestions=unpictured.map(p=>{
+    const key=signature(p.name);
+    const candidates=products.filter(x=>x.image&&x.id!==p.id&&signature(x.name)===key&&key.length>2);
+    const candidate=candidates[0];
+    return {product:p,candidate};
+  });
+  async function applyBulkImages(){
+    const selected=suggestions.filter(x=>bulkSelected[x.product.id]&&bulkImages[x.product.id]?.image);
+    if(!selected.length)return;
+    setBulkSaving(true);setBulkResult("");
+    let saved=0,failed=0;
+    for(const {product} of selected){
+      try{
+        const chosen=bulkImages[product.id];
+        await update(ref(db,`products/${product.id}`),{image:chosen.image,imageCredit:chosen.imageCredit||"",imageLicense:chosen.imageLicense||"",imageSourceUrl:chosen.imageSourceUrl||"",updatedAt:now()});
+        saved++;
+      }catch(e){failed++;}
+    }
+    setBulkSaving(false);
+    setBulkResult(`تم إسناد ${saved} صورة${failed?`، وتعذر حفظ ${failed}`:""}`);
+    setBulkSelected({});setBulkImages({});
+  }
 
+  useEffect(()=>onValue(ref(db,"products"),snap=>{
+    const data=snap.val()||{};
+    setProducts(Object.entries(data).map(([id,v])=>({id,...v})).filter(x=>String(x.storeId)===String(store.id)));
+  }),[store.id]);
+  async function uploadImage(event){
+    const file=event.target.files?.[0];
+    if(!file)return;
+    event.target.value="";
+    if(!["image/jpeg","image/png","image/webp"].includes(file.type)){setImageError("اختر صورة JPG أو PNG أو WEBP");return;}
+    if(file.size>5*1024*1024){setImageError("الصورة يجب أن تكون أقل من 5MB");return;}
+    setUploading(true);setImageError("");
+    try{
+      const cloud=import.meta.env.VITE_CLOUDINARY_CLOUD_NAME?.trim()||"q0cty6ky";
+      const preset=import.meta.env.VITE_CLOUDINARY_UPLOAD_PRESET?.trim()||"bringo_products";
+      const data=new FormData();
+      data.append("file",file);
+      data.append("upload_preset",preset);
+      const response=await fetch(`https://api.cloudinary.com/v1_1/${encodeURIComponent(cloud)}/image/upload`,{method:"POST",body:data});
+      const result=await response.json().catch(()=>({}));
+      if(!response.ok||!result.secure_url)throw new Error(result.error?.message||`فشل الرفع (HTTP ${response.status})`);
+      setF(prev=>({...prev,image:result.secure_url}));
+    }catch(error){setImageError(`تعذر رفع الصورة: ${error.message}`);}
+    finally{setUploading(false);}
+  }
+  async function save(e){
+    e.preventDefault();
+    if(uploading||saving)return;
+    if(!f.name.trim()||!(+f.price>0)){alert("اكتب الاسم والسعر");return;}
+    setSaving(true);
+    try{
+      const p={...f,price:+f.price,stock:+(f.stock||0),storeId:store.id,storeName:store.name,storeType:store.type,updatedAt:now()};
+      if(edit)await update(ref(db,`products/${edit}`),p);
+      else{const q=push(ref(db,"products"));await set(q,{id:q.key,...p,createdAt:now()});}
+      setF({name:"",price:"",stock:"",unit:"قطعة",menuCategoryName:"",image:"",isAvailable:true});
+      setEdit(null);setImageError("");
+    }catch(error){alert(`تعذر حفظ المنتج: ${error.message}`);}
+    finally{setSaving(false);}
+  }
+  return <>{bulkOpen&&<div className="bringo-library-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget&&!bulkSaving)setBulkOpen(false);}}><section className="bringo-library-dialog" role="dialog" aria-modal="true" aria-label="إسناد صور للمنتجات"><header className="bringo-library-header"><div><h3>إسناد صور للمنتجات</h3><p>مطابقة دقيقة للأسماء الموجودة في متجرك فقط. راجع كل اقتراح قبل التطبيق.</p></div><button type="button" disabled={bulkSaving} onClick={()=>setBulkOpen(false)}>×</button></header><div style={{overflow:"auto",padding:"12px 20px",display:"grid",gap:12}}>{suggestions.length?suggestions.map(({product,candidate})=>{const chosen=bulkImages[product.id]||candidate;return <div key={product.id} style={{display:"flex",alignItems:"center",gap:12,borderBottom:"1px solid #eee",paddingBottom:12}}><input type="checkbox" disabled={!chosen?.image||bulkSaving} checked={!!bulkSelected[product.id]&&!!chosen?.image} onChange={e=>setBulkSelected(prev=>({...prev,[product.id]:e.target.checked}))}/>{chosen?.image?<img src={chosen.image} alt="" style={{width:65,height:65,objectFit:"contain"}}/>:<div style={{width:65,height:65,background:"#f1f5f3",borderRadius:8}}/>}<div style={{flex:1}}><strong>{product.name}</strong><div style={{fontSize:12,color:"#64748b"}}>{chosen?.image?"صورة مقترحة — تأكد من مطابقتها":"لا توجد مطابقة دقيقة"}</div></div><button type="button" disabled={bulkSaving} onClick={()=>{setBulkTarget(product.id);setBulkLibraryOpen(true);}}>اختيار صورة</button></div>;}):<p>كل منتجات المتجر لديها صور بالفعل.</p>}</div><footer className="bringo-library-footer"><button type="button" disabled={bulkSaving||!suggestions.some(x=>bulkSelected[x.product.id]&&(bulkImages[x.product.id]||x.candidate)?.image)} onClick={async()=>{const selected=suggestions.filter(x=>bulkSelected[x.product.id]&&(bulkImages[x.product.id]||x.candidate)?.image);setBulkSaving(true);setBulkResult("");let saved=0,failed=0;for(const {product,candidate} of selected){const chosen=bulkImages[product.id]||candidate;try{await update(ref(db,`products/${product.id}`),{image:chosen.image,imageCredit:chosen.imageCredit||"",imageLicense:chosen.imageLicense||"",imageSourceUrl:chosen.imageSourceUrl||"",updatedAt:now()});saved++;}catch(e){failed++;}}setBulkSaving(false);setBulkResult(`تم إسناد ${saved} صورة${failed?`، فشل ${failed}`:""}`);setBulkSelected({});setBulkImages({});}}>{bulkSaving?"جاري حفظ الصور...":"تطبيق الصور المحددة"}</button>{bulkResult&&<p role="status">{bulkResult}</p>}</footer></section></div>}{bulkLibraryOpen&&<ProductImageLibrary onSelect={item=>{setBulkImages(prev=>({...prev,[bulkTarget]:{image:item.image,imageCredit:item.credit||"",imageLicense:item.license||"",imageSourceUrl:item.sourceUrl||""}}));setBulkSelected(prev=>({...prev,[bulkTarget]:true}));}} onClose={()=>setBulkLibraryOpen(false)}/>} {libraryOpen&&<ProductImageLibrary onSelect={item=>{setF(prev=>({...prev,image:item.image,imageCredit:item.credit||"",imageLicense:item.license||"",imageSourceUrl:item.sourceUrl||""}));setImageError("");}} onClose={()=>setLibraryOpen(false)}/>}<Title title="المنتجات" sub="إدارة قائمة منتجات متجرك"/><div className="products">
+    <form className="panel form" onSubmit={save}><h2>{edit?"تعديل المنتج":"إضافة منتج"}</h2>
+      {["name","price","stock","unit","menuCategoryName"].map(k=><label key={k}>{({name:"الاسم",price:"السعر",stock:"المخزون",unit:"الوحدة",menuCategoryName:"القسم"})[k]}<input type={["price","stock"].includes(k)?"number":"text"} value={f[k]} onChange={e=>setF(prev=>({...prev,[k]:e.target.value}))}/></label>)}
+      <button type="button" className="bringo-library-trigger" onClick={()=>setLibraryOpen(true)}>اختيار صورة من مكتبة برينجو</button>
+      <label>أو ارفع صورة جديدة<input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploading||saving} onChange={uploadImage}/></label>
+      {uploading&&<small>جاري رفع الصورة...</small>}
+      {imageError&&<small role="alert" style={{color:"#b91c1c"}}>{imageError}</small>}
+      {f.image&&<div><img src={f.image} alt="معاينة صورة المنتج" style={{width:110,height:110,objectFit:"contain",borderRadius:10}} onError={()=>setImageError("رابط الصورة لا يعمل؛ اختر صورة جديدة")}/><small>تم تحديد صورة المنتج</small></div>}
+      <label className="check"><input type="checkbox" checked={f.isAvailable} onChange={e=>setF(prev=>({...prev,isAvailable:e.target.checked}))}/>متاح للبيع</label>
+      <button disabled={uploading||saving}>{uploading?"انتظر رفع الصورة":saving?"جاري الحفظ...":edit?"حفظ التعديلات":"إضافة المنتج"}</button>
+    </form>
+    <div className="panel table"><h2>المنتجات ({products.length})</h2><button type="button" className="bringo-library-trigger" disabled={autoBusy} onClick={autoAssignImages}>{autoBusy?"جاري الإسناد التلقائي...":"إسناد الصور تلقائيًا لكل المنتجات بدون صور"}</button>{autoStatus&&<p role="status" style={{fontSize:13}}>{autoStatus}</p>}<button type="button" className="bringo-library-trigger" onClick={()=>{setBulkOpen(true);setBulkResult("");}}>إسناد صور من المكتبة للمنتجات ({unpictured.length} بدون صور)</button><table><thead><tr><th>المنتج</th><th>القسم</th><th>السعر</th><th>الحالة</th><th/></tr></thead><tbody>{products.map(p=><tr key={p.id}><td>{p.name}</td><td>{p.menuCategoryName||"-"}</td><td>{money(p.price)}</td><td>{p.isAvailable===false?"غير متاح":"متاح"}</td><td><button className="tiny" onClick={()=>{setEdit(p.id);setF({...f,...p});setImageError("");}}>تعديل</button><button className="tiny danger" onClick={()=>confirm("حذف المنتج؟")&&remove(ref(db,`products/${p.id}`))}>حذف</button></td></tr>)}</tbody></table></div>
+  </div></>;
+}
 function Settlements(){
   const{orders,loading}=useOrders();
   const report=useMemo(()=>{
@@ -409,7 +519,6 @@ function Settlements(){
     </section>
   </>;
 }
-
 
 function validCoordinates(lat, lng) {
   const latitude = Number(lat), longitude = Number(lng);
