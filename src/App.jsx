@@ -410,9 +410,72 @@ function Settlements(){
   </>;
 }
 
+
+function validCoordinates(lat, lng) {
+  const latitude = Number(lat), longitude = Number(lng);
+  return lat !== "" && lng !== "" && lat !== null && lng !== null &&
+    Number.isFinite(latitude) && Number.isFinite(longitude) &&
+    latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180 &&
+    !(latitude === 0 && longitude === 0);
+}
+
+function StoreLocationPicker({latitude, longitude, onChange}) {
+  const [locating, setLocating] = useState(false);
+  const [message, setMessage] = useState("");
+  const valid = validCoordinates(latitude, longitude);
+  const lat = Number(latitude), lng = Number(longitude);
+  const marker = valid ? `${lat},${lng}` : "";
+  const mapUrl = valid
+    ? `https://www.openstreetmap.org/export/embed.html?bbox=${lng-.006}%2C${lat-.004}%2C${lng+.006}%2C${lat+.004}&layer=mapnik&marker=${lat}%2C${lng}`
+    : "";
+
+  function locate() {
+    if (!navigator.geolocation) {
+      setMessage("المتصفح لا يدعم تحديد الموقع. يمكنك اختيار نقطة على الخريطة.");
+      return;
+    }
+    setLocating(true);
+    setMessage("");
+    navigator.geolocation.getCurrentPosition(
+      position => {
+        onChange(position.coords.latitude.toFixed(7), position.coords.longitude.toFixed(7));
+        setLocating(false);
+        setMessage("تم تحديد الموقع. راجع العلامة على الخريطة واضغط حفظ.");
+      },
+      error => {
+        setLocating(false);
+        setMessage(error.code === 1 ? "السماح بالموقع مرفوض. فعّله من المتصفح أو حدد الموقع على الخريطة." : "تعذر جلب موقعك. جرب مرة أخرى أو حدد الموقع على الخريطة.");
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+    );
+  }
+
+  return <section className="provider-location">
+    <div className="provider-location-heading"><MapPin size={21}/><div><h2>موقع المتجر</h2><p>حدد الموقع الفعلي للمتجر حتى يتم حساب توصيل الطلبات بصورة صحيحة.</p></div></div>
+    <div className="provider-location-actions">
+      <button type="button" onClick={locate} disabled={locating} className="provider-locate-btn">
+        <MapPin size={18}/>{locating ? "جاري تحديد موقعك..." : "تحديد موقعي الحالي"}
+      </button>
+      <a href="https://www.openstreetmap.org/#map=13/26.556/31.694" target="_blank" rel="noopener noreferrer" className="provider-location-link">فتح الخريطة لاختيار الموقع</a>
+    </div>
+    <p className="provider-location-tip">لو مش داخل المتجر حاليًا، افتح الخريطة، اضغط على موقع المتجر وخد الإحداثيات؛ ما تستخدمش موقعك الشخصي بالغلط.</p>
+    <div className="provider-location-fields">
+      <label>خط العرض Latitude<input type="number" step="any" min="-90" max="90" inputMode="decimal" value={latitude ?? ""} onChange={e => onChange(e.target.value, longitude ?? "")} placeholder="26.55..."/></label>
+      <label>خط الطول Longitude<input type="number" step="any" min="-180" max="180" inputMode="decimal" value={longitude ?? ""} onChange={e => onChange(latitude ?? "", e.target.value)} placeholder="31.69..."/></label>
+    </div>
+    {valid ? <div className="provider-location-preview">
+      <iframe key={marker} title="موقع المتجر على الخريطة" loading="lazy" src={mapUrl} referrerPolicy="no-referrer-when-downgrade" />
+      <small>الإحداثيات: {lat.toFixed(6)}، {lng.toFixed(6)}</small>
+    </div> : <div className="provider-location-empty">موقع المتجر غير محدد بعد. اضغط «تحديد موقعي الحالي» أو أدخل الإحداثيات.</div>}
+    {message && <p className="provider-location-message">{message}</p>}
+  </section>;
+}
+
 function SettingsPage() {
   const { store } = useAuth();
   const [f, setF] = useState(store);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     setF(store);
@@ -420,14 +483,33 @@ function SettingsPage() {
 
   async function save(e) {
     e.preventDefault();
-
-    await update(ref(db, `stores/${store.id}`), {
-      ...f,
-      preparationTime: Number(f?.preparationTime || 25),
-      updatedAt: now(),
-    });
-
-    alert("تم الحفظ");
+    setNotice("");
+    if (!validCoordinates(f?.latitude ?? "", f?.longitude ?? "")) {
+      setNotice("حدد موقع المتجر الصحيح أولاً. الموقع مطلوب لحساب التوصيل.");
+      return;
+    }
+    const lat = Number(f.latitude), lng = Number(f.longitude);
+    try {
+      setBusy(true);
+      // Only update editable fields; preserve store ID, status and admin-owned data.
+      await update(ref(db, `stores/${store.id}`), {
+        name: String(f.name || "").trim(),
+        phone: String(f.phone || "").trim(),
+        address: String(f.address || "").trim(),
+        preparationTime: Number(f?.preparationTime || 25),
+        isOpen: f?.isOpen !== false,
+        acceptsOrders: f?.acceptsOrders !== false,
+        latitude: lat,
+        longitude: lng,
+        locationUpdatedAt: now(),
+        updatedAt: now(),
+      });
+      setNotice("تم حفظ بيانات وموقع المتجر بنجاح. سيتم استخدامه في حساب رسوم التوصيل.");
+    } catch (error) {
+      setNotice(`تعذر حفظ الإعدادات: ${error?.message || "راجع الاتصال وصلاحيات Firebase"}`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   const fields = [
@@ -439,57 +521,26 @@ function SettingsPage() {
 
   return (
     <>
-      <Title
-        title="إعدادات المتجر"
-        sub="بيانات التشغيل والاستقبال"
-      />
-
+      <Title title="إعدادات المتجر" sub="بيانات التشغيل وموقع المتجر لاستقبال طلبات التوصيل"/>
       <form className="panel form settings" onSubmit={save}>
-        {fields.map((field) => (
-          <label key={field.key}>
-            {field.label}
-            <input
-              type={field.key === "preparationTime" ? "number" : "text"}
+        {fields.map(field => (
+          <label key={field.key}>{field.label}
+            <input type={field.key === "preparationTime" ? "number" : "text"}
               value={f?.[field.key] ?? ""}
-              onChange={(e) =>
-                setF((current) => ({
-                  ...current,
-                  [field.key]: e.target.value,
-                }))
-              }
-            />
+              onChange={e => setF(current => ({ ...current, [field.key]: e.target.value }))}/>
           </label>
         ))}
-
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={f?.isOpen !== false}
-            onChange={(e) =>
-              setF((current) => ({
-                ...current,
-                isOpen: e.target.checked,
-              }))
-            }
-          />
-          المتجر مفتوح
-        </label>
-
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={f?.acceptsOrders !== false}
-            onChange={(e) =>
-              setF((current) => ({
-                ...current,
-                acceptsOrders: e.target.checked,
-              }))
-            }
-          />
-          استقبال الطلبات
-        </label>
-
-        <button type="submit">حفظ الإعدادات</button>
+        <StoreLocationPicker
+          latitude={f?.latitude ?? ""}
+          longitude={f?.longitude ?? ""}
+          onChange={(latitude, longitude) => setF(current => ({ ...current, latitude, longitude }))}
+        />
+        <label className="check"><input type="checkbox" checked={f?.isOpen !== false}
+          onChange={e => setF(current => ({ ...current, isOpen: e.target.checked }))}/>المتجر مفتوح</label>
+        <label className="check"><input type="checkbox" checked={f?.acceptsOrders !== false}
+          onChange={e => setF(current => ({ ...current, acceptsOrders: e.target.checked }))}/>استقبال الطلبات</label>
+        {notice && <div role="status" className="provider-location-notice">{notice}</div>}
+        <button type="submit" disabled={busy}>{busy ? "جاري حفظ الإعدادات..." : "حفظ الإعدادات والموقع"}</button>
       </form>
     </>
   );
