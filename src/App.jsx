@@ -459,6 +459,7 @@ function StoreLocationPicker({latitude, longitude, onChange}) {
       <a href="https://www.openstreetmap.org/#map=13/26.556/31.694" target="_blank" rel="noopener noreferrer" className="provider-location-link">فتح الخريطة لاختيار الموقع</a>
     </div>
     <p className="provider-location-tip">لو مش داخل المتجر حاليًا، افتح الخريطة، اضغط على موقع المتجر وخد الإحداثيات؛ ما تستخدمش موقعك الشخصي بالغلط.</p>
+    <p className="provider-location-tip">يمكنك كذلك النقر داخل خريطة المعاينة لتغيير العلامة إلى الموقع الصحيح قبل الحفظ.</p>
     <div className="provider-location-fields">
       <label>خط العرض Latitude<input type="number" step="any" min="-90" max="90" inputMode="decimal" value={latitude ?? ""} onChange={e => onChange(e.target.value, longitude ?? "")} placeholder="26.55..."/></label>
       <label>خط الطول Longitude<input type="number" step="any" min="-180" max="180" inputMode="decimal" value={longitude ?? ""} onChange={e => onChange(latitude ?? "", e.target.value)} placeholder="31.69..."/></label>
