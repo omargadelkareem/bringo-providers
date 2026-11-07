@@ -97,7 +97,7 @@ function Layout(){
         <div className="welcome"><b>أهلاً، {provider?.name||"مقدم الخدمة"}</b><small>{store.name} • البيانات محدثة لحظيًا</small></div>
         <button className={`store-toggle ${store.isOpen===false?"closed":""}`} onClick={toggle}><span/>{store.isOpen===false?"المتجر مغلق":"المتجر مفتوح"}</button>
       </div>
-      <div className="content"><Outlet/></div>
+      <div className="content">{!validCoordinates(store?.latitude ?? "", store?.longitude ?? "") && <div className="provider-location-warning"><MapPin size={20}/><span>موقع متجرك غير محدد. حدده من الإعدادات لتفعيل حساب رسوم التوصيل للعملاء.</span><NavLink to="/settings">تحديد الموقع</NavLink></div>}<Outlet/></div>
     </main>
     {open&&<button className="shade" onClick={()=>setOpen(false)}/>}
   </div>;
