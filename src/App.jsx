@@ -419,6 +419,58 @@ function validCoordinates(lat, lng) {
     !(latitude === 0 && longitude === 0);
 }
 
+function InteractiveStoreMap({ latitude, longitude, onChange }) {
+  const nodeRef = useRef(null);
+  const mapRef = useRef(null);
+  const pinRef = useRef(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    const L = window.L;
+    if (!L || !nodeRef.current || mapRef.current) return undefined;
+    const hasLocation = validCoordinates(latitude, longitude);
+    const center = hasLocation ? [Number(latitude), Number(longitude)] : [26.556, 31.694];
+    const map = L.map(nodeRef.current, { scrollWheelZoom: false }).setView(center, hasLocation ? 16 : 12);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    mapRef.current = map;
+    if (hasLocation) pinRef.current = L.marker(center, { draggable: true }).addTo(map);
+    const selected = (e) => onChangeRef.current(e.latlng.lat.toFixed(7), e.latlng.lng.toFixed(7));
+    map.on("click", selected);
+    const moved = (e) => selected({ latlng: e.target.getLatLng() });
+    if (pinRef.current) pinRef.current.on("dragend", moved);
+    const id = window.setTimeout(() => map.invalidateSize(), 100);
+    return () => {
+      window.clearTimeout(id);
+      map.off("click", selected);
+      map.remove();
+      mapRef.current = null;
+      pinRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const L = window.L, map = mapRef.current;
+    if (!L || !map || !validCoordinates(latitude, longitude)) return;
+    const coord = [Number(latitude), Number(longitude)];
+    if (!pinRef.current) {
+      pinRef.current = L.marker(coord, { draggable: true }).addTo(map);
+      pinRef.current.on("dragend", e => {
+        const point = e.target.getLatLng();
+        onChangeRef.current(point.lat.toFixed(7), point.lng.toFixed(7));
+      });
+    } else {
+      pinRef.current.setLatLng(coord);
+    }
+    map.panTo(coord);
+  }, [latitude, longitude]);
+
+  return <div ref={nodeRef} className="provider-interactive-map" aria-label="اضغط على موقع المتجر على الخريطة لتحديده"/>;
+}
+
 function StoreLocationPicker({latitude, longitude, onChange}) {
   const [locating, setLocating] = useState(false);
   const [message, setMessage] = useState("");
@@ -459,15 +511,17 @@ function StoreLocationPicker({latitude, longitude, onChange}) {
       <a href="https://www.openstreetmap.org/#map=13/26.556/31.694" target="_blank" rel="noopener noreferrer" className="provider-location-link">فتح الخريطة لاختيار الموقع</a>
     </div>
     <p className="provider-location-tip">لو مش داخل المتجر حاليًا، افتح الخريطة، اضغط على موقع المتجر وخد الإحداثيات؛ ما تستخدمش موقعك الشخصي بالغلط.</p>
-    <p className="provider-location-tip">يمكنك كذلك النقر داخل خريطة المعاينة لتغيير العلامة إلى الموقع الصحيح قبل الحفظ.</p>
+    <p className="provider-location-tip">اضغط على النقطة الصحيحة داخل الخريطة أو حرّك العلامة لتحديد المتجر بدقة، ثم اضغط حفظ الإعدادات والموقع.</p>
     <div className="provider-location-fields">
       <label>خط العرض Latitude<input type="number" step="any" min="-90" max="90" inputMode="decimal" value={latitude ?? ""} onChange={e => onChange(e.target.value, longitude ?? "")} placeholder="26.55..."/></label>
       <label>خط الطول Longitude<input type="number" step="any" min="-180" max="180" inputMode="decimal" value={longitude ?? ""} onChange={e => onChange(latitude ?? "", e.target.value)} placeholder="31.69..."/></label>
     </div>
-    {valid ? <div className="provider-location-preview">
-      <iframe key={marker} title="موقع المتجر على الخريطة" loading="lazy" src={mapUrl} referrerPolicy="no-referrer-when-downgrade" />
-      <small>الإحداثيات: {lat.toFixed(6)}، {lng.toFixed(6)}</small>
-    </div> : <div className="provider-location-empty">موقع المتجر غير محدد بعد. اضغط «تحديد موقعي الحالي» أو أدخل الإحداثيات.</div>}
+    <div className="provider-location-preview">
+      {window.L
+        ? <InteractiveStoreMap latitude={latitude} longitude={longitude} onChange={onChange}/>
+        : valid ? <iframe title="معاينة موقع المتجر" loading="lazy" src={mapUrl}/> : <div className="provider-location-empty">الخريطة غير متاحة الآن؛ يمكنك استخدام تحديد موقعي الحالي أو إدخال الإحداثيات.</div>}
+      {valid && <small>الإحداثيات: {lat.toFixed(6)}، {lng.toFixed(6)}</small>}
+    </div>
     {message && <p className="provider-location-message">{message}</p>}
   </section>;
 }
