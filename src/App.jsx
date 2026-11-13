@@ -71,7 +71,7 @@ function Login(){
 function Layout(){
   const{store,provider,logout}=useAuth();
   const[open,setOpen]=useState(false);
-  useNewOrderNotifications(store);
+  const {enableAlerts,alertsEnabled,pendingCount}=useNewOrderNotifications(store);
   const nav=[
     ["/","نظرة عامة",LayoutDashboard],
     ["/orders/new","طلبات جديدة",Bell],
@@ -99,7 +99,7 @@ function Layout(){
         <div className="welcome"><b>أهلاً، {provider?.name||"مقدم الخدمة"}</b><small>{store.name} • البيانات محدثة لحظيًا</small></div>
         <button className={`store-toggle ${store.isOpen===false?"closed":""}`} onClick={toggle}><span/>{store.isOpen===false?"المتجر مغلق":"المتجر مفتوح"}</button>
       </div>
-      <div className="content">{!validCoordinates(store?.latitude ?? "", store?.longitude ?? "") && <div className="provider-location-warning"><MapPin size={20}/><span>موقع متجرك غير محدد. حدده من الإعدادات لتفعيل حساب رسوم التوصيل للعملاء.</span><NavLink to="/settings">تحديد الموقع</NavLink></div>}<Outlet/></div>
+      <div className="content"><div role="status" style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",padding:"12px 16px",borderRadius:12,marginBottom:16,background:"#f2f8f5"}}><Bell size={20}/><span style={{flex:1}}>{pendingCount?`عندك ${pendingCount} طلب جديد في انتظار القبول`:"فعّل تنبيهات الطلبات على هذا الجهاز"}</span><button type="button" onClick={enableAlerts}>{alertsEnabled?"الصوت مفعل • السماح بالإشعارات":"تفعيل الصوت والإشعارات"}</button></div>{!validCoordinates(store?.latitude ?? "", store?.longitude ?? "") && <div className="provider-location-warning"><MapPin size={20}/><span>موقع متجرك غير محدد. حدده من الإعدادات لتفعيل حساب رسوم التوصيل للعملاء.</span><NavLink to="/settings">تحديد الموقع</NavLink></div>}<Outlet/></div>
     </main>
     {open&&<button className="shade" onClick={()=>setOpen(false)}/>}
   </div>;
@@ -145,29 +145,74 @@ async function writeStatus(order,status,extra={}){
 function useNewOrderNotifications(store){
   const initialized=useRef(false);
   const known=useRef(new Set());
+  const audio=useRef(null);
+  const [alertsEnabled,setAlertsEnabled]=useState(false);
+  const [pendingCount,setPendingCount]=useState(0);
+
+  async function enableAlerts(){
+    try{
+      const C=window.AudioContext||window.webkitAudioContext;
+      if(C){
+        audio.current ||= new C();
+        await audio.current.resume();
+      }
+      if("Notification" in window && Notification.permission==="default"){
+        await Notification.requestPermission();
+      }
+      setAlertsEnabled(true);
+    }catch(e){console.warn("Unable to enable alerts",e);}
+  }
+
   useEffect(()=>{
+    initialized.current=false;
+    known.current=new Set();
+    setPendingCount(0);
     if(!store?.id)return;
-    const ordersRef=ref(db,"orders");
-    return onValue(ordersRef,s=>{
-      const list=Object.entries(s.val()||{})
-        .map(([id,v])=>({id,...v}))
-        .filter(o=>String(o.storeId ?? o.store?.id ?? o.providerStoreId ?? "").trim() ===
-          String(store.id ?? store.storeId ?? "").trim() &&
-          normalizeStatus(o) === S.PENDING);
-      const ids=new Set(list.map(o=>o.id));
+    const storeId=String(store.id??store.storeId??"").trim();
+    const play=()=>{
+      const c=audio.current;
+      if(!c||c.state!=="running")return;
+      try{
+        const osc=c.createOscillator(),g=c.createGain();
+        osc.frequency.value=880;
+        g.gain.setValueAtTime(0.08,c.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.45);
+        osc.connect(g);g.connect(c.destination);
+        osc.start();osc.stop(c.currentTime+0.45);
+      }catch(e){console.warn("Notification sound unavailable",e);}
+    };
+    const unsubscribe=onValue(ref(db,"orders"),snap=>{
+      const pending=Object.entries(snap.val()||{})
+        .map(([id,v])=>({id,...(v||{})}))
+        .filter(o=>String(o.storeId??o.store?.id??o.providerStoreId??"").trim()===storeId&&normalizeStatus(o)===S.PENDING);
+      const ids=new Set(pending.map(o=>o.id));
+      setPendingCount(pending.length);
       if(!initialized.current){known.current=ids;initialized.current=true;return;}
-      const fresh=list.filter(o=>!known.current.has(o.id));
+      const fresh=pending.filter(o=>!known.current.has(o.id));
       known.current=ids;
-      fresh.forEach(o=>{
-        try{
-          const C=window.AudioContext||window.webkitAudioContext;if(C){const c=new C(),osc=c.createOscillator(),g=c.createGain();osc.frequency.value=880;g.gain.value=.08;osc.connect(g);g.connect(c.destination);osc.start();osc.stop(c.currentTime+.35)}
-        }catch{}
-        if("Notification"in window&&Notification.permission==="granted"){
-          new Notification("طلب جديد على Bringo",{body:`طلب #${o.id.slice(-6).toUpperCase()} • ${money(o.total)}`});
-        }
-      });
+      if(!fresh.length)return;
+      play();
+      if("Notification" in window&&Notification.permission==="granted"){
+        fresh.forEach(o=>{
+          try{
+            const n=new Notification("طلب جديد على Bringo",{
+              body:`طلب #${o.id.slice(-6).toUpperCase()} • ${money(o.total)}`,
+              tag:`bringo-order-${o.id}`,
+              requireInteraction:true
+            });
+            n.onclick=()=>{window.focus();window.location.assign("/orders/new");n.close();};
+          }catch(e){console.warn("System notification unavailable",e);}
+        });
+      }
     });
+    return ()=>{unsubscribe();document.title="Bringo Provider";};
   },[store?.id]);
+
+  useEffect(()=>{
+    document.title=pendingCount>0?`(${pendingCount}) طلبات جديدة • Bringo`:"Bringo Provider";
+  },[pendingCount]);
+
+  return {enableAlerts,alertsEnabled,pendingCount};
 }
 
 function DriverBox({order}) {
