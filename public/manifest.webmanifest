@@ -1,0 +1,18 @@
+{
+  "name": "Bringo Providers",
+  "short_name": "Bringo",
+  "description": "لوحة إدارة طلبات Bringo",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#145c45",
+  "icons": [
+    {
+      "src": "/bringo-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
