@@ -71,6 +71,9 @@ function Login(){
 function Layout(){
   const{store,provider,logout}=useAuth();
   const[open,setOpen]=useState(false);
+  const [installPrompt,setInstallPrompt]=useState(null);
+  useEffect(()=>{const onPrompt=e=>{e.preventDefault();setInstallPrompt(e);};window.addEventListener("beforeinstallprompt",onPrompt);return ()=>window.removeEventListener("beforeinstallprompt",onPrompt);},[]);
+  async function installApp(){if(!installPrompt)return;await installPrompt.prompt();setInstallPrompt(null);}
   const {enableAlerts,alertsEnabled,pendingCount}=useNewOrderNotifications(store);
   const nav=[
     ["/","نظرة عامة",LayoutDashboard],
@@ -99,7 +102,7 @@ function Layout(){
         <div className="welcome"><b>أهلاً، {provider?.name||"مقدم الخدمة"}</b><small>{store.name} • البيانات محدثة لحظيًا</small></div>
         <button className={`store-toggle ${store.isOpen===false?"closed":""}`} onClick={toggle}><span/>{store.isOpen===false?"المتجر مغلق":"المتجر مفتوح"}</button>
       </div>
-      <div className="content"><div role="status" style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",padding:"12px 16px",borderRadius:12,marginBottom:16,background:"#f2f8f5"}}><Bell size={20}/><span style={{flex:1}}>{pendingCount?`عندك ${pendingCount} طلب جديد في انتظار القبول`:"فعّل تنبيهات الطلبات على هذا الجهاز"}</span><button type="button" onClick={enableAlerts}>{alertsEnabled?"الصوت مفعل • السماح بالإشعارات":"تفعيل الصوت والإشعارات"}</button></div>{!validCoordinates(store?.latitude ?? "", store?.longitude ?? "") && <div className="provider-location-warning"><MapPin size={20}/><span>موقع متجرك غير محدد. حدده من الإعدادات لتفعيل حساب رسوم التوصيل للعملاء.</span><NavLink to="/settings">تحديد الموقع</NavLink></div>}<Outlet/></div>
+      <div className="content">{installPrompt&&<div style={{padding:12,marginBottom:12,background:"#e9f6ed",borderRadius:12,display:"flex",alignItems:"center",gap:12}}><span style={{flex:1}}>ثبّت لوحة Bringo على شاشة موبايلك</span><button type="button" onClick={installApp}>تثبيت التطبيق</button></div>}<div role="status" style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",padding:"12px 16px",borderRadius:12,marginBottom:16,background:"#f2f8f5"}}><Bell size={20}/><span style={{flex:1}}>{pendingCount?`عندك ${pendingCount} طلب جديد في انتظار القبول`:"فعّل تنبيهات الطلبات على هذا الجهاز"}</span><button type="button" onClick={enableAlerts}>{alertsEnabled?"الصوت مفعل • السماح بالإشعارات":"تفعيل الصوت والإشعارات"}</button></div>{!validCoordinates(store?.latitude ?? "", store?.longitude ?? "") && <div className="provider-location-warning"><MapPin size={20}/><span>موقع متجرك غير محدد. حدده من الإعدادات لتفعيل حساب رسوم التوصيل للعملاء.</span><NavLink to="/settings">تحديد الموقع</NavLink></div>}<Outlet/></div>
     </main>
     {open&&<button className="shade" onClick={()=>setOpen(false)}/>}
   </div>;
