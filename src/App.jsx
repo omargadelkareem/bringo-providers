@@ -9,7 +9,7 @@ import {
   PackageCheck, Settings, Store, WalletCards, X, Bike, Phone,
   MapPin, CheckCircle2, Clock3, UserRound, Banknote
 } from "lucide-react";
-import { onValue, push, ref, remove, set, update } from "firebase/database";
+import { onValue, push, ref, remove, set, update, runTransaction } from "firebase/database";
 import { db } from "./firebase";
 import { useAuth } from "./context";
 import { S, labels, money, date, normalizeStatus, isAccounting } from "./orders";
@@ -315,11 +315,59 @@ function OrderCard({order,actions=true}){
   </article>;
 }
 
+// Merchant preparation is independent of driver assignment. The customer app
+// continues reading the existing status/orderStatus fields.
+function merchantStatus(order) {
+  if (order.storeStatus) return order.storeStatus;
+  const status = normalizeStatus(order);
+  if ([S.REJECTED, S.CANCELLED].includes(status)) return "rejected";
+  if ([S.READY, S.PICKED, S.WAY, S.DONE].includes(status)) return "ready";
+  if ([S.PREPARING, S.ASSIGNED].includes(status)) return "preparing";
+  return "pending";
+}
+
+async function updateMerchantOrder(order, next) {
+  const orderRef = ref(db, `orders/${order.id}`);
+  const result = await runTransaction(orderRef, current => {
+    if (!current) return;
+    const state = merchantStatus(current);
+    if (next === "preparing" && state !== "pending") return;
+    if (next === "ready" && state !== "preparing") return;
+    if (next === "rejected" && state !== "pending") return;
+    const t = now();
+    const assigned = Boolean(String(current.driverId || current.driverKey || "").trim());
+    const status = next === "rejected" ? S.REJECTED :
+      next === "ready" ? (assigned ? S.ASSIGNED : S.READY) :
+      (assigned ? S.ASSIGNED : S.PREPARING);
+    return {
+      ...current,
+      storeStatus: next,
+      status,
+      orderStatus: status,
+      updatedAt: t,
+      ...(next === "preparing" ? {acceptedAt:t,preparingAt:t} : {}),
+      ...(next === "ready" ? {readyAt:t} : {}),
+      ...(next === "rejected" ? {rejectedAt:t,driverDispatchStatus:"cancelled"} : {}),
+    };
+  }, {applyLocally:false});
+  if (!result.committed) throw new Error("تم تحديث الطلب من جهاز آخر. حدّث الصفحة وحاول مجددًا.");
+}
+
 function OrderActions({order}){
-  const status=normalizeStatus(order);
-  if(status===S.PENDING)return <footer className="actions"><button className="secondary" onClick={()=>writeStatus(order,S.REJECTED,{rejectedAt:now()})}>رفض</button><button onClick={()=>writeStatus(order,S.PREPARING,{acceptedAt:now(),preparingAt:now()})}>قبول وبدء التجهيز</button></footer>;
-  if(status===S.PREPARING)return <footer className="actions"><button onClick={()=>writeStatus(order,S.READY,{readyAt:now()})}>تم التجهيز • اطلب طيار</button></footer>;
-  return null;
+  const state=merchantStatus(order);
+  const [busy,setBusy]=useState(false);
+  const [error,setError]=useState("");
+  const act=async next=>{
+    setBusy(true);setError("");
+    try{await updateMerchantOrder(order,next);}catch(e){setError(e?.message||"تعذر تحديث الطلب");}
+    finally{setBusy(false);}
+  };
+  if(!["pending","preparing"].includes(state))return null;
+  return <footer className="actions" style={{flexWrap:"wrap"}}>
+    {state==="pending"&&<><button disabled={busy} className="secondary" onClick={()=>act("rejected")}>رفض</button><button disabled={busy} onClick={()=>act("preparing")}>قبول وبدء التجهيز</button></>}
+    {state==="preparing"&&<button disabled={busy} onClick={()=>act("ready")}>تم تجهيز الطلب • جاهز للاستلام</button>}
+    {error&&<small role="alert" style={{color:"#b42318",width:"100%"}}>{error}</small>}
+  </footer>;
 }
 
 function Title({title,sub,right}){
@@ -333,10 +381,10 @@ function Dashboard() {
   const { orders, loading } = useOrders();
 
   const stats = useMemo(() => {
-    const pending = orders.filter(o => normalizeStatus(o) === S.PENDING);
-    const preparing = orders.filter(o => normalizeStatus(o) === S.PREPARING);
+    const pending = orders.filter(o => merchantStatus(o) === "pending");
+    const preparing = orders.filter(o => merchantStatus(o) === "preparing");
     const readyOrDriver = orders.filter(o =>
-      [S.READY, S.ASSIGNED, S.PICKED, S.WAY].includes(normalizeStatus(o))
+      merchantStatus(o) === "ready" || [S.PICKED, S.WAY].includes(normalizeStatus(o))
     );
     const done = orders.filter(o => normalizeStatus(o) === S.DONE);
 
@@ -415,7 +463,7 @@ function Orders(){
     ready:{title:"جاهزة والطيار",sub:"شاهد الطيار الذي قبل الطلب وحالة الاستلام لحظيًا.",statuses:[S.READY,S.ASSIGNED,S.PICKED,S.WAY]},
     history:{title:"سجل الطلبات",sub:"أرشيف الطلبات المكتملة والمرفوضة والملغاة.",statuses:[S.DONE,S.REJECTED,S.CANCELLED]},
   }[mode]||{title:"الطلبات",sub:"",statuses:[]};
-  const list=orders.filter(o=>config.statuses.includes(normalizeStatus(o)));
+  const list=orders.filter(o=> mode==="new" ? merchantStatus(o)==="pending" : mode==="preparing" ? merchantStatus(o)==="preparing" : mode==="ready" ? (merchantStatus(o)==="ready" || [S.PICKED,S.WAY].includes(normalizeStatus(o))) : config.statuses.includes(normalizeStatus(o)) || merchantStatus(o)==="rejected");
   return <>
     <Title title={config.title} sub={config.sub}/>
     {loading?<div className="loader"/>:list.length?<div className="orders-grid">{list.map(o=><OrderCard key={o.id} order={o}/>)}</div>:<section className="panel"><Empty/></section>}
