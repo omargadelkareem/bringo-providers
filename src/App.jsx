@@ -1,5 +1,6 @@
 import {imageGroup,fetchGroupImage} from "./autoProductImages";
 import ProductImageLibrary from "./ProductImageLibrary";
+import * as XLSX from "xlsx";
 import {
   Navigate, NavLink, Outlet, Route, Routes, useParams
 } from "react-router-dom";
@@ -482,6 +483,30 @@ function Products(){
   const [bulkOpen,setBulkOpen]=useState(false);
   const [autoBusy,setAutoBusy]=useState(false);
   const [autoStatus,setAutoStatus]=useState("");
+  function exportProductsExcel(){
+    if(!products.length){alert("لا توجد منتجات في هذا المتجر لتصديرها");return;}
+    // Export the logged-in store's current Firebase records, not the old import file.
+    // Match the existing ProductExcelImport column names for easy re-import.
+    const columns=[
+      "name","brand","price","oldPrice","stock","unit",
+      "menuCategoryName","description","image","isAvailable",
+      "isBestSeller","isOffer"
+    ];
+    const rows=products.map(product=>Object.fromEntries(columns.map(key=>[
+      key, product[key] ?? (["isAvailable"].includes(key) ? true :
+        ["isBestSeller","isOffer"].includes(key) ? false : "")
+    ])));
+    const sheet=XLSX.utils.json_to_sheet(rows,{header:columns});
+    sheet["!cols"]=[
+      {wch:35},{wch:20},{wch:12},{wch:12},{wch:12},{wch:14},
+      {wch:25},{wch:45},{wch:60},{wch:15},{wch:15},{wch:12}
+    ];
+    const workbook=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook,sheet,"Products");
+    const safeName=String(store?.name||"store")
+      .replace(/[\\/:*?"<>|]/g,"-").replace(/\s+/g,"_").slice(0,60);
+    XLSX.writeFile(workbook,`Bringo_${safeName}_Products_${new Date().toISOString().slice(0,10)}.xlsx`);
+  }
   async function autoAssignImages(){
     if(autoBusy)return;
     const missing=products.filter(p=>!p.image);
@@ -585,7 +610,7 @@ function Products(){
       <label className="check"><input type="checkbox" checked={f.isAvailable} onChange={e=>setF(prev=>({...prev,isAvailable:e.target.checked}))}/>متاح للبيع</label>
       <button disabled={uploading||saving}>{uploading?"انتظر رفع الصورة":saving?"جاري الحفظ...":edit?"حفظ التعديلات":"إضافة المنتج"}</button>
     </form>
-    <div className="panel table"><h2>المنتجات ({products.length})</h2><button type="button" className="bringo-library-trigger" disabled={autoBusy} onClick={autoAssignImages}>{autoBusy?"جاري الإسناد التلقائي...":"إسناد الصور تلقائيًا لكل المنتجات بدون صور"}</button>{autoStatus&&<p role="status" style={{fontSize:13}}>{autoStatus}</p>}<button type="button" className="bringo-library-trigger" onClick={()=>{setBulkOpen(true);setBulkResult("");}}>إسناد صور من المكتبة للمنتجات ({unpictured.length} بدون صور)</button><table><thead><tr><th>المنتج</th><th>القسم</th><th>السعر</th><th>الحالة</th><th/></tr></thead><tbody>{products.map(p=><tr key={p.id}><td>{p.name}</td><td>{p.menuCategoryName||"-"}</td><td>{money(p.price)}</td><td>{p.isAvailable===false?"غير متاح":"متاح"}</td><td><button className="tiny" onClick={()=>{setEdit(p.id);setF({...f,...p});setImageError("");}}>تعديل</button><button className="tiny danger" onClick={()=>confirm("حذف المنتج؟")&&remove(ref(db,`products/${p.id}`))}>حذف</button></td></tr>)}</tbody></table></div>
+    <div className="panel table"><h2>المنتجات ({products.length})</h2><button type="button" className="bringo-library-trigger" onClick={exportProductsExcel} disabled={!products.length} title="تنزيل كل منتجات المتجر الحالي بصيغة Excel">تنزيل منتجات المتجر Excel ({products.length})</button><button type="button" className="bringo-library-trigger" disabled={autoBusy} onClick={autoAssignImages}>{autoBusy?"جاري الإسناد التلقائي...":"إسناد الصور تلقائيًا لكل المنتجات بدون صور"}</button>{autoStatus&&<p role="status" style={{fontSize:13}}>{autoStatus}</p>}<button type="button" className="bringo-library-trigger" onClick={()=>{setBulkOpen(true);setBulkResult("");}}>إسناد صور من المكتبة للمنتجات ({unpictured.length} بدون صور)</button><table><thead><tr><th>المنتج</th><th>القسم</th><th>السعر</th><th>الحالة</th><th/></tr></thead><tbody>{products.map(p=><tr key={p.id}><td>{p.name}</td><td>{p.menuCategoryName||"-"}</td><td>{money(p.price)}</td><td>{p.isAvailable===false?"غير متاح":"متاح"}</td><td><button className="tiny" onClick={()=>{setEdit(p.id);setF({...f,...p});setImageError("");}}>تعديل</button><button className="tiny danger" onClick={()=>confirm("حذف المنتج؟")&&remove(ref(db,`products/${p.id}`))}>حذف</button></td></tr>)}</tbody></table></div>
   </div></>;
 }
 function Settlements(){
