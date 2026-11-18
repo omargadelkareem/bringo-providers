@@ -243,7 +243,7 @@ function useNewOrderNotifications(store){
     document.title=pendingCount>0?`(${pendingCount}) طلبات جديدة • Bringo`:"Bringo Provider";
   },[pendingCount]);
 
-  return {enableAlerts,alertsEnabled,pendingCount,alertOrders,muted,setMuted,testAlert:()=>{setTestCount(v=>v+1);setMuted(false);}};
+  return {enableAlerts,alertsEnabled,pendingCount,alertOrders,muted,setMuted,testAlert:async()=>{await enableAlerts();setMuted(false);const c=audio.current;if(!c)return;try{const o=c.createOscillator(),g=c.createGain();o.frequency.value=880;g.gain.setValueAtTime(0.15,c.currentTime);g.gain.exponentialRampToValueAtTime(0.001,c.currentTime+0.5);o.connect(g);g.connect(c.destination);o.start();o.stop(c.currentTime+0.5);}catch(e){console.warn(e);}setTestCount(v=>v+1);}};
 }
 
 function DriverBox({order}) {
