@@ -74,7 +74,7 @@ function Layout(){
   const [installPrompt,setInstallPrompt]=useState(null);
   useEffect(()=>{const onPrompt=e=>{e.preventDefault();setInstallPrompt(e);};window.addEventListener("beforeinstallprompt",onPrompt);return ()=>window.removeEventListener("beforeinstallprompt",onPrompt);},[]);
   async function installApp(){if(!installPrompt)return;await installPrompt.prompt();setInstallPrompt(null);}
-  const {enableAlerts,alertsEnabled,pendingCount}=useNewOrderNotifications(store);
+  const {enableAlerts,alertsEnabled,pendingCount,alertOrders,muted,setMuted,testAlert}=useNewOrderNotifications(store);
   const nav=[
     ["/","نظرة عامة",LayoutDashboard],
     ["/orders/new","طلبات جديدة",Bell],
@@ -102,7 +102,7 @@ function Layout(){
         <div className="welcome"><b>أهلاً، {provider?.name||"مقدم الخدمة"}</b><small>{store.name} • البيانات محدثة لحظيًا</small></div>
         <button className={`store-toggle ${store.isOpen===false?"closed":""}`} onClick={toggle}><span/>{store.isOpen===false?"المتجر مغلق":"المتجر مفتوح"}</button>
       </div>
-      <div className="content">{installPrompt&&<div style={{padding:12,marginBottom:12,background:"#e9f6ed",borderRadius:12,display:"flex",alignItems:"center",gap:12}}><span style={{flex:1}}>ثبّت لوحة Bringo على شاشة موبايلك</span><button type="button" onClick={installApp}>تثبيت التطبيق</button></div>}<div role="status" style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",padding:"12px 16px",borderRadius:12,marginBottom:16,background:"#f2f8f5"}}><Bell size={20}/><span style={{flex:1}}>{pendingCount?`عندك ${pendingCount} طلب جديد في انتظار القبول`:"فعّل تنبيهات الطلبات على هذا الجهاز"}</span><button type="button" onClick={enableAlerts}>{alertsEnabled?"الصوت مفعل • السماح بالإشعارات":"تفعيل الصوت والإشعارات"}</button></div>{!validCoordinates(store?.latitude ?? "", store?.longitude ?? "") && <div className="provider-location-warning"><MapPin size={20}/><span>موقع متجرك غير محدد. حدده من الإعدادات لتفعيل حساب رسوم التوصيل للعملاء.</span><NavLink to="/settings">تحديد الموقع</NavLink></div>}<Outlet/></div>
+      <div className="content">{installPrompt&&<div style={{padding:12,marginBottom:12,background:"#e9f6ed",borderRadius:12,display:"flex",alignItems:"center",gap:12}}><span style={{flex:1}}>ثبّت لوحة Bringo على شاشة موبايلك</span><button type="button" onClick={installApp}>تثبيت التطبيق</button></div>}<div role="status" style={{display:"flex",gap:12,alignItems:"center",flexWrap:"wrap",padding:"12px 16px",borderRadius:12,marginBottom:16,background:"#f2f8f5"}}><Bell size={20}/><span style={{flex:1}}>{pendingCount?`عندك ${pendingCount} طلب جديد في انتظار القبول`:"فعّل تنبيهات الطلبات على هذا الجهاز"}</span><button type="button" onClick={enableAlerts}>{alertsEnabled?"الصوت مفعل • السماح بالإشعارات":"تفعيل الصوت والإشعارات"}</button>{alertsEnabled&&<button type="button" onClick={()=>setMuted(v=>!v)}>{muted?"تشغيل الجرس":"كتم الجرس"}</button>}{alertsEnabled&&<button type="button" onClick={testAlert}>اختبار الجرس</button>}</div>{!validCoordinates(store?.latitude ?? "", store?.longitude ?? "") && <div className="provider-location-warning"><MapPin size={20}/><span>موقع متجرك غير محدد. حدده من الإعدادات لتفعيل حساب رسوم التوصيل للعملاء.</span><NavLink to="/settings">تحديد الموقع</NavLink></div>}{pendingCount>0&&<div role="alertdialog" aria-label="طلبات جديدة تنتظر القبول" style={{position:"fixed",inset:0,zIndex:9999,background:"rgba(0,0,0,.55)",display:"grid",placeItems:"center",padding:16}}><div style={{background:"#fff",borderRadius:18,padding:28,maxWidth:440,width:"100%",textAlign:"center",boxShadow:"0 20px 60px rgba(0,0,0,.2)"}}><Bell size={44} color="#c43131"/><h2 style={{margin:"12px 0"}}>🔔 عندك {pendingCount} طلب جديد!</h2><p>فيه طلبات مستنية قبول المتجر. افتحها دلوقتي عشان العملاء ما يستنوش.</p><p style={{fontWeight:700}}>{alertOrders[0]?.id?"آخر طلب: #"+String(alertOrders[0].id).slice(-6):""}</p><NavLink to="/orders/new" style={{display:"block",background:"#127a50",color:"white",padding:14,borderRadius:12,textDecoration:"none",fontWeight:700}}>عرض الطلبات الجديدة</NavLink><button type="button" onClick={()=>setMuted(v=>!v)} style={{marginTop:12}}>{muted?"تشغيل الجرس":"كتم الصوت مؤقتًا"}</button></div></div>}<Outlet/></div>
     </main>
     {open&&<button className="shade" onClick={()=>setOpen(false)}/>}
   </div>;
@@ -151,6 +151,9 @@ function useNewOrderNotifications(store){
   const audio=useRef(null);
   const [alertsEnabled,setAlertsEnabled]=useState(false);
   const [pendingCount,setPendingCount]=useState(0);
+  const [muted,setMuted]=useState(false);
+  const [alertOrders,setAlertOrders]=useState([]);
+  const [testCount,setTestCount]=useState(0);
 
   async function enableAlerts(){
     try{
@@ -190,6 +193,7 @@ function useNewOrderNotifications(store){
         .filter(o=>String(o.storeId??o.store?.id??o.providerStoreId??"").trim()===storeId&&normalizeStatus(o)===S.PENDING);
       const ids=new Set(pending.map(o=>o.id));
       setPendingCount(pending.length);
+      setAlertOrders(pending);
       if(!initialized.current){known.current=ids;initialized.current=true;return;}
       const fresh=pending.filter(o=>!known.current.has(o.id));
       known.current=ids;
@@ -211,11 +215,34 @@ function useNewOrderNotifications(store){
     return ()=>{unsubscribe();document.title="Bringo Provider";};
   },[store?.id]);
 
+  // Repeat the audible alarm while orders are awaiting the provider's response.
+  // Audio is unlocked only after a user gesture, as required by browsers.
+  useEffect(()=>{
+    if(!alertsEnabled||muted||pendingCount===0)return;
+    const ring=()=>{
+      const c=audio.current;
+      if(!c||c.state!=="running")return;
+      try{
+        [0,0.28,0.56].forEach((delay)=>{
+          const oscillator=c.createOscillator(),gain=c.createGain();
+          oscillator.type="sine";oscillator.frequency.value=880;
+          gain.gain.setValueAtTime(0.0001,c.currentTime+delay);
+          gain.gain.exponentialRampToValueAtTime(0.16,c.currentTime+delay+0.03);
+          gain.gain.exponentialRampToValueAtTime(0.0001,c.currentTime+delay+0.24);
+          oscillator.connect(gain);gain.connect(c.destination);
+          oscillator.start(c.currentTime+delay);oscillator.stop(c.currentTime+delay+0.25);
+        });
+      }catch(e){console.warn("Order alarm unavailable",e);}
+    };
+    ring();const interval=window.setInterval(ring,6000);
+    return ()=>window.clearInterval(interval);
+  },[alertsEnabled,muted,pendingCount,testCount]);
+
   useEffect(()=>{
     document.title=pendingCount>0?`(${pendingCount}) طلبات جديدة • Bringo`:"Bringo Provider";
   },[pendingCount]);
 
-  return {enableAlerts,alertsEnabled,pendingCount};
+  return {enableAlerts,alertsEnabled,pendingCount,alertOrders,muted,setMuted,testAlert:()=>{setTestCount(v=>v+1);setMuted(false);}};
 }
 
 function DriverBox({order}) {
